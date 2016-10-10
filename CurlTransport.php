@@ -7,7 +7,6 @@
 
 namespace yii\httpclient;
 
-use yii\base\Exception;
 use Yii;
 
 /**
@@ -27,6 +26,8 @@ class CurlTransport extends Transport
      */
     public function send($request)
     {
+        $request->beforeSend();
+
         $curlOptions = $this->prepare($request);
         $curlResource = $this->initCurl($curlOptions);
 
@@ -37,7 +38,12 @@ class CurlTransport extends Transport
         Yii::info($token, __METHOD__);
         Yii::beginProfile($token, __METHOD__);
 
-        $responseContent = curl_exec($curlResource);
+        try {
+            $responseContent = curl_exec($curlResource);
+        } catch (\Exception $e) {
+            Yii::endProfile($token, __METHOD__);
+            throw new Exception($e->getMessage(), $e->getCode(), $e);
+        }
 
         Yii::endProfile($token, __METHOD__);
 
@@ -51,7 +57,11 @@ class CurlTransport extends Transport
             throw new Exception('Curl error: #' . $errorNumber . ' - ' . $errorMessage);
         }
 
-        return $request->client->createResponse($responseContent, $responseHeaders);
+        $response = $request->client->createResponse($responseContent, $responseHeaders);
+
+        $request->afterSend($response);
+
+        return $response;
     }
 
     /**
@@ -66,6 +76,8 @@ class CurlTransport extends Transport
         $responseHeaders = [];
         foreach ($requests as $key => $request) {
             /* @var $request Request */
+            $request->beforeSend();
+
             $curlOptions = $this->prepare($request);
             $curlResource = $this->initCurl($curlOptions);
 
@@ -80,16 +92,21 @@ class CurlTransport extends Transport
         Yii::info($token, __METHOD__);
         Yii::beginProfile($token, __METHOD__);
 
-        $isRunning = null;
-        do {
-            // See https://bugs.php.net/bug.php?id=61141
-            if (curl_multi_select($curlBatchResource) === -1) {
-                usleep(100);
-            }
+        try {
+            $isRunning = null;
             do {
-                $curlExecCode = curl_multi_exec($curlBatchResource, $isRunning);
-            } while ($curlExecCode === CURLM_CALL_MULTI_PERFORM);
-        } while ($isRunning > 0 && $curlExecCode === CURLM_OK);
+                // See https://bugs.php.net/bug.php?id=61141
+                if (curl_multi_select($curlBatchResource) === -1) {
+                    usleep(100);
+                }
+                do {
+                    $curlExecCode = curl_multi_exec($curlBatchResource, $isRunning);
+                } while ($curlExecCode === CURLM_CALL_MULTI_PERFORM);
+            } while ($isRunning > 0 && $curlExecCode === CURLM_OK);
+        } catch (\Exception $e) {
+            Yii::endProfile($token, __METHOD__);
+            throw new Exception($e->getMessage(), $e->getCode(), $e);
+        }
 
         Yii::endProfile($token, __METHOD__);
 
@@ -103,7 +120,9 @@ class CurlTransport extends Transport
 
         $responses = [];
         foreach ($requests as $key => $request) {
-            $responses[$key] = $request->client->createResponse($responseContents[$key], $responseHeaders[$key]);
+            $response = $request->client->createResponse($responseContents[$key], $responseHeaders[$key]);
+            $request->afterSend($response);
+            $responses[$key] = $response;
         }
         return $responses;
     }
@@ -121,8 +140,6 @@ class CurlTransport extends Transport
 
         $method = strtoupper($request->getMethod());
         switch ($method) {
-            case 'GET':
-                break;
             case 'POST':
                 $curlOptions[CURLOPT_POST] = true;
                 break;
@@ -131,12 +148,16 @@ class CurlTransport extends Transport
         }
 
         $content = $request->getContent();
-        if ($content !== null) {
+        if ($content === null) {
+            if ($method === 'HEAD') {
+                $curlOptions[CURLOPT_NOBODY] = true;
+            }
+        } else {
             $curlOptions[CURLOPT_POSTFIELDS] = $content;
         }
 
         $curlOptions[CURLOPT_RETURNTRANSFER] = true;
-        $curlOptions[CURLOPT_URL] = $request->getUrl();
+        $curlOptions[CURLOPT_URL] = $request->getFullUrl();
         $curlOptions[CURLOPT_HTTPHEADER] = $request->composeHeaderLines();
 
         return $curlOptions;
@@ -165,6 +186,7 @@ class CurlTransport extends Transport
     private function composeCurlOptions(array $options)
     {
         static $optionMap = [
+            'protocolVersion' => CURLOPT_HTTP_VERSION,
             'maxRedirects' => CURLOPT_MAXREDIRS,
             'sslCapath' => CURLOPT_CAPATH,
             'sslCafile' => CURLOPT_CAINFO,

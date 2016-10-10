@@ -7,6 +7,7 @@
 
 namespace yii\httpclient;
 
+use Yii;
 use yii\base\Object;
 
 /**
@@ -27,6 +28,11 @@ class UrlEncodedFormatter extends Object implements FormatterInterface
      *    This encoding type is required by OpenID and OAuth protocols.
      */
     public $encodingType = PHP_QUERY_RFC1738;
+    /**
+     * @var string the content charset. If not set, it will use the value of [[\yii\base\Application::charset]].
+     * @since 2.0.1
+     */
+    public $charset;
 
 
     /**
@@ -47,7 +53,9 @@ class UrlEncodedFormatter extends Object implements FormatterInterface
             return $request;
         }
 
-        $request->getHeaders()->set('Content-Type', 'application/x-www-form-urlencoded');
+        $charset = $this->charset === null ? Yii::$app->charset : $this->charset;
+
+        $request->getHeaders()->set('Content-Type', 'application/x-www-form-urlencoded; charset=' . $charset);
         $request->setContent($content);
         return $request;
     }

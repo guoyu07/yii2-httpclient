@@ -16,6 +16,11 @@ use Yii;
 /**
  * Debugger panel that collects and displays HTTP requests performed.
  *
+ * @property \yii\httpclient\Client $httpClient Note that the type of this property differs in getter and
+ * setter. See [[getHttpClient()]] and [[setHttpClient()]] for details.
+ * @property array $methods This property is read-only.
+ * @property array $types This property is read-only.
+ *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 2.0
  */
@@ -129,7 +134,11 @@ class HttpClientPanel extends Panel
     public function save()
     {
         $target = $this->module->logTarget;
-        $messages = $target->filterMessages($target->messages, Logger::LEVEL_PROFILE, ['yii\httpclient\Transport*']);
+        $messages = $target->filterMessages($target->messages, Logger::LEVEL_PROFILE, [
+            'yii\httpclient\Transport::*',
+            'yii\httpclient\CurlTransport::*',
+            'yii\httpclient\StreamTransport::*',
+        ]);
         return ['messages' => $messages];
     }
 

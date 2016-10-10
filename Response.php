@@ -7,15 +7,14 @@
 
 namespace yii\httpclient;
 
-use yii\base\Exception;
 use yii\web\Cookie;
 use yii\web\HeaderCollection;
 
 /**
  * Response represents HTTP request response.
  *
- * @property string $statusCode response status code.
- * @property boolean $isOk whether response is OK.
+ * @property boolean $isOk Whether response is OK. This property is read-only.
+ * @property string $statusCode Status code. This property is read-only.
  *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 2.0
@@ -155,7 +154,15 @@ class Response extends Message
                 }
             }
         }
-        return new Cookie($params);
+
+        $cookie = new Cookie();
+        foreach ($params as $name => $value) {
+            if ($cookie->canSetProperty($name)) {
+                // Cookie string may contain custom unsupported params
+                $cookie->$name = $value;
+            }
+        }
+        return $cookie;
     }
 
     /**
@@ -167,6 +174,7 @@ class Response extends Message
         static $nameMap = [
             'expires' => 'expire',
             'httponly' => 'httpOnly',
+            'max-age' => 'maxAge',
         ];
         $name = strtolower($rawName);
         if (isset($nameMap[$name])) {

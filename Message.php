@@ -7,8 +7,8 @@
 
 namespace yii\httpclient;
 
+use yii\base\Component;
 use yii\base\ErrorHandler;
-use yii\base\Object;
 use yii\web\Cookie;
 use yii\web\CookieCollection;
 use yii\web\HeaderCollection;
@@ -17,16 +17,18 @@ use Yii;
 /**
  * Message represents a base HTTP message.
  *
- * @property HeaderCollection|array $headers message headers list.
- * @property CookieCollection|Cookie[]|array $cookies message cookies list.
- * @property string $content message raw content.
- * @property mixed $data message content data.
- * @property string $format message content format.
+ * @property string $content Raw body.
+ * @property CookieCollection|Cookie[] $cookies The cookie collection. Note that the type of this property
+ * differs in getter and setter. See [[getCookies()]] and [[setCookies()]] for details.
+ * @property mixed $data Content data fields.
+ * @property string $format Body format name.
+ * @property HeaderCollection $headers The header collection. Note that the type of this property differs in
+ * getter and setter. See [[getHeaders()]] and [[setHeaders()]] for details.
  *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 2.0
  */
-class Message extends Object
+class Message extends Component
 {
     /**
      * @var Client owner client instance.
@@ -228,6 +230,22 @@ class Message extends Object
     public function getData()
     {
         return $this->_data;
+    }
+
+    /**
+     * Adds data fields to the existing ones.
+     * @param array $data additional content data fields.
+     * @return $this self reference.
+     * @since 2.0.1
+     */
+    public function addData($data)
+    {
+        if (empty($this->_data)) {
+            $this->_data = $data;
+        } else {
+            $this->_data = array_merge($this->_data, $data);
+        }
+        return $this;
     }
 
     /**

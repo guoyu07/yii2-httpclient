@@ -6,15 +6,17 @@
  */
 
 namespace yii\httpclient;
+
 use yii\helpers\ArrayHelper;
 use yii\helpers\FileHelper;
 
 /**
  * Request represents HTTP request.
  *
- * @property string $url target URL.
- * @property string $method request method.
- * @property array $options request options. See [[setOptions()]] for details.
+ * @property string $fullUrl Full target URL. This property is read-only.
+ * @property string $method Request method.
+ * @property array $options Request options. This property is read-only.
+ * @property string|array $url Target URL or URL parameters.
  *
  * @author Paul Klimov <klimov.paul@gmail.com>
  * @since 2.0
@@ -22,9 +24,22 @@ use yii\helpers\FileHelper;
 class Request extends Message
 {
     /**
-     * @var string target URL.
+     * @event RequestEvent an event raised right before sending request.
+     */
+    const EVENT_BEFORE_SEND = 'beforeSend';
+    /**
+     * @event RequestEvent an event raised right after request has been sent.
+     */
+    const EVENT_AFTER_SEND = 'afterSend';
+
+    /**
+     * @var string|array target URL.
      */
     private $_url;
+    /**
+     * @var string|null full target URL.
+     */
+    private $_fullUrl;
     /**
      * @var string request method.
      */
@@ -33,24 +48,45 @@ class Request extends Message
      * @var array request options.
      */
     private $_options = [];
+    /**
+     * @var boolean whether request object has been prepared for sending or not.
+     * @see prepare()
+     */
+    private $isPrepared = false;
 
 
     /**
-     * @param string $url target URL
+     * Sets target URL.
+     * @param string|array $url use a string to represent a URL (e.g. `http://some-domain.com`, `item/list`),
+     * or an array to represent a URL with query parameters (e.g. `['item/list', 'param1' => 'value1']`).
      * @return $this self reference.
      */
     public function setUrl($url)
     {
         $this->_url = $url;
+        $this->_fullUrl = null;
         return $this;
     }
 
     /**
-     * @return string target URL
+     * Returns target URL.
+     * @return string|array target URL or URL parameters
      */
     public function getUrl()
     {
         return $this->_url;
+    }
+
+    /**
+     * Returns full target URL, including [[Client::baseUrl]] as a string.
+     * @return string full target URL.
+     */
+    public function getFullUrl()
+    {
+        if ($this->_fullUrl === null) {
+            $this->_fullUrl = $this->createFullUrl($this->getUrl());
+        }
+        return $this->_fullUrl;
     }
 
     /**
@@ -78,6 +114,7 @@ class Request extends Message
      * - userAgent: string, the contents of the "User-Agent: " header to be used in a HTTP request.
      * - followLocation: boolean, whether to follow any "Location: " header that the server sends as part of the HTTP header.
      * - maxRedirects: integer, the max number of redirects to follow.
+     * - protocolVersion: float|string, HTTP protocol version.
      * - sslVerifyPeer: boolean, whether verification of the peer's certificate should be performed.
      * - sslCafile: string, location of Certificate Authority file on local filesystem which should be used with
      *   the 'sslVerifyPeer' option to authenticate the identity of the remote peer.
@@ -188,19 +225,48 @@ class Request extends Message
      */
     public function prepare()
     {
-        if (!empty($this->client->baseUrl)) {
-            $url = $this->getUrl();
-            if (!preg_match('/^https?:\\/\\//i', $url)) {
-                $this->setUrl($this->client->baseUrl . '/' . $url);
-            }
-        }
         $content = $this->getContent();
         if ($content === null) {
             $this->getFormatter()->format($this);
         } elseif (is_array($content)) {
             $this->prepareMultiPartContent($content);
         }
+
+        $this->isPrepared = true;
+
         return $this;
+    }
+
+    /**
+     * Normalizes given URL value, filling it with actual string URL value.
+     * @param array|string $url raw URL,
+     * @return string full URL
+     */
+    private function createFullUrl($url)
+    {
+        if (is_array($url)) {
+            $params = $url;
+            if (isset($params[0])) {
+                $url = $params[0];
+                unset($params[0]);
+            }
+            if (!empty($params)) {
+                if (strpos($url, '?') === false) {
+                    $url .= '?';
+                } else {
+                    $url .= '&';
+                }
+                $url .= http_build_query($params);
+            }
+        }
+
+        if (!empty($this->client->baseUrl)) {
+            if (!preg_match('/^https?:\\/\\//i', $url)) {
+                $url = $this->client->baseUrl . '/' . $url;
+            }
+        }
+
+        return $url;
     }
 
     /**
@@ -303,11 +369,45 @@ class Request extends Message
     }
 
     /**
+     * This method is invoked right before this request is sent.
+     * The method will invoke [[Client::beforeSend()]] and trigger the [[EVENT_BEFORE_SEND]] event.
+     * @since 2.0.1
+     */
+    public function beforeSend()
+    {
+        $this->client->beforeSend($this);
+
+        $event = new RequestEvent();
+        $event->request = $this;
+        $this->trigger(self::EVENT_BEFORE_SEND, $event);
+    }
+
+    /**
+     * This method is invoked right after this request is sent.
+     * The method will invoke [[Client::afterSend()]] and trigger the [[EVENT_AFTER_SEND]] event.
+     * @param Response $response received response instance.
+     * @since 2.0.1
+     */
+    public function afterSend($response)
+    {
+        $this->client->afterSend($this, $response);
+
+        $event = new RequestEvent();
+        $event->request = $this;
+        $event->response = $response;
+        $this->trigger(self::EVENT_AFTER_SEND, $event);
+    }
+
+    /**
      * @inheritdoc
      */
     public function toString()
     {
-        $result = strtoupper($this->getMethod()) . ' ' . $this->getUrl();
+        if (!$this->isPrepared) {
+            $this->prepare();
+        }
+
+        $result = strtoupper($this->getMethod()) . ' ' . $this->getFullUrl();
 
         $parentResult = parent::toString();
         if ($parentResult !== '') {
